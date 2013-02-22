@@ -12,14 +12,13 @@ Files used by the program are in a folder called progdata
 #include<cstring>
 #include<cstdlib>
 #include<ctime>
+#include<conio.h>	//for _get_restrict_che()
 #include<string>
 #include<set>
 #include<algorithm>
 #include<boost\foreach.hpp>
 #include<boost\tokenizer.hpp>
 #include<boost\lexical_cast.hpp>
-#include<eku\io\_io.h>
-#include<eku\io\fio.h>
 //#include<windows.h>
 
 #define COMP_FORM_SIZE 20
@@ -39,7 +38,9 @@ Files used by the program are in a folder called progdata
 #define RXNS_FILE		"progdata\\rxns.txt"
 #define ION_COLOR	"progdata\\coloured ions.txt"
 #define GAS_SMELL_COLOR	"progdata\\gases.txt"
-#define SOL_SALTS	"progdata\\soluble salts.txt"
+#define ANAL_SALTS	"progdata\\salt analysis\\salts.txt"
+#define ANAL_CATIONS	"progdata\\salt analysis\\cations.txt"
+#define ANAL_ANIONS	"progdata\\salt analysis\\anions.txt"
 #define HELP_FILE	"progdata\\help.txt"
 
 //global=functions================================================================
@@ -85,6 +86,17 @@ bool ion_match(const char* ion,const char* stdion)
 	if(h<hstd)return false;
 	for(i=0;i<hstd;i++)if(ion[i]!=stdion[i])return false;
 	return true;
+}
+
+char _get_restrict_che(const char* a)
+{
+	char ch;unsigned i;
+	while(true)
+	{
+		ch=_getch();
+		for(i=0;a[i]!='\0';i++)if(ch==a[i])
+		{_putch(ch);return ch;}
+	}
 }
 
 void disp_error(const char* str)
@@ -444,22 +456,18 @@ namespace boost
 	}
 }
 
-comp_t get_random_salt()
+void get_random_line(const char* fname,char* line)
 {
-	std::ifstream ifile(SOL_SALTS);
+	std::ifstream ifile(ANAL_SALTS);
 	int i,size,pos;
-	char str[COMP_FORM_SIZE];
 	comp_t comp;
-	if(!ifile.is_open())disp_error(std::string("Can't open ")+SOL_SALTS);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+ANAL_SALTS);
 	for(size=0;ifile.ignore(10000,'\n');++size);
 	ifile.clear();
 	ifile.seekg(0);
 	srand(unsigned(time(NULL)));pos=rand()%size;
-	for(i=0;i<=pos;i++)ifile>>str;
+	for(i=0;i<=pos;i++)ifile>>line;
 	ifile.close();
-	comp=comp_t(str,myenum::solid,myenum::salt);
-	comp.split();
-	return comp;
 }
 
 bool my_includes(const std::set<comp_t>& bigset,const std::set<comp_t>& smallset)
@@ -648,6 +656,9 @@ void tube_t::react_prep()
 	}
 	ifile.close();
 	if(!found)return;
+	//convert solid ions to aqueous ions
+	for(it=comp_list.begin();it!=comp_list.end();++it)
+	{if(it->comp_type==myenum::anion || it->comp_type==myenum::cation)it->st=myenum::aq;}
 	//dissociate if not in ppts file and found in NEVER_PPT_ION
 	ifile.clear();
 	ifile.open(PPTS);
@@ -820,6 +831,35 @@ std::string tube_t::phys_obs(bool disp_each/*=false*/)const
 //================================================================================
 
 using namespace std;
+
+comp_t get_random_anion()
+{
+	comp_t comp;
+	get_random_line(ANAL_ANIONS,comp.form);
+	comp.st=myenum::solid;
+	comp.comp_type=myenum::anion;
+	return comp;
+}
+
+comp_t get_random_cation()
+{
+	comp_t comp;
+	get_random_line(ANAL_CATIONS,comp.form);
+	comp.st=myenum::solid;
+	comp.comp_type=myenum::cation;
+	return comp;
+}
+
+comp_t get_random_salt()
+{
+	comp_t comp;
+	get_random_line(ANAL_SALTS,comp.form);
+	comp.st=myenum::solid;
+	comp.comp_type=myenum::salt;
+	comp.split();
+	return comp;
+}
+
 void reaction()
 {
 	std::string str;
@@ -849,20 +889,30 @@ void show_help()
 	disp_msg(str);
 }
 
-void salt_analysis()
+void salt_analysis(char mode)
 {
 	std::string str;
 	tube_t tube;
 	bool heat;
-	comp_t salt=get_random_salt();
+	comp_t comp;
+	if(mode=='s')comp=get_random_salt();
+	else if(mode=='a')comp=get_random_anion();
+	else if(mode=='c')comp=get_random_cation();
+	tube.add(comp);
 	do
 	{
 		cout<<"\nEnter reagents:\t";
-		cin>>str;
-		if(str==salt.form)cout<<"Correct!"<<endl;
-		else if(str=="answer")cout<<salt.form<<endl;
-		else if(str=="new")salt=get_random_salt();
-		else if(str=="clear")tube.comp_list.clear();
+		if(cin.peek()=='\n')cin.ignore();
+		getline(cin,str);
+		if(str==comp.form)cout<<"Correct!"<<endl;
+		else if(str=="answer")cout<<comp.form<<endl;
+		else if(str=="new")
+		{
+			if(mode=='s')comp=get_random_salt();
+			else if(mode=='a')comp=get_random_anion();
+			else if(mode=='c')comp=get_random_cation();
+		}
+		else if(str=="clear"){tube.comp_list.clear();tube.add(comp);}
 		else if(str=="disp")cout<<boost::lexical_cast<std::string>(tube)<<endl;
 		else if(str=="help")show_help();
 		else
@@ -871,7 +921,6 @@ void salt_analysis()
 			heat=('y'==_get_restrict_che("yn"));
 			cout<<endl;
 			tube.add(str,heat);
-			tube.add(salt);
 			tube.react_list(RXNS_FILE);
 			tube.phys_obs(true);
 		}
@@ -882,10 +931,10 @@ void salt_analysis()
 int main()
 {
 	char ch;
-	cout<<"Enter an option:\ns - Salt analysis\nr - Reactions"<<endl;
-	ch=_get_restrict_che("sr");
+	cout<<"Enter an option:\nr - Reactions\ns - Salt analysis\na - Anion analysis\nc - Cation analysis\n"<<endl;
+	ch=_get_restrict_che("rsac");
 	cout<<endl;
 	if(ch=='r')reaction();
-	else salt_analysis();
+	else salt_analysis(ch);
 	return 0;
 }
