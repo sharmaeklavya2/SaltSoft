@@ -1,11 +1,21 @@
 /*This is a program to simulate chemical tests. A list of reactions will be provided (inbuilt[+user]).
 The user will enter products and reactants will be computed.
-Physical characteristics of the compound will also be computed using a file
-
+Physical characteristics of the compound will also be computed using files
 Files used by the program are in a folder called progdata
+
+When I started making this project, I didn't know that usually STL uses
+(!(a>b) && !(b<a)) instead of a==b
+Because comp_t::operator==(const comp_t&)const is not a transitive function,
+I had to write my own algorithms at some places.
+Also, I cannot always use the fact that std::set<comp_t> is sorted
+as MgCO3(s)==CO32-(aq) while sorting is on the basis of chemical formula.
+Hence, while checking if one set includes the other,
+I can't use the algorithm optimized for sorted ranges
+
+Because of the above reason, the program may seem a bit chaotic.
 */
 
-#pragma warning(disable: 4996)
+#pragma warning(disable:4996)
 
 #include<iostream>
 #include<fstream>
@@ -22,7 +32,6 @@ Files used by the program are in a folder called progdata
 //#include<windows.h>
 
 #define COMP_FORM_SIZE 20
-#define COMP_NAME_SIZE 30
 #define FILE_PATH_SIZE 256
 #define FILE_NAME_SIZE 30
 
@@ -80,7 +89,7 @@ comp_t::split() calls this function as a subprocedure*/
 }
 
 bool ion_match(const char* ion,const char* stdion)
-//refines anion obtained after crude_salt_split
+//checks if anion obtained after crude_salt_split is correct
 {
 	int i,h=strlen(ion),hstd=strlen(stdion);
 	if(h<hstd)return false;
@@ -318,7 +327,7 @@ class tube_t
 	//The reaction list file contains file names from the RXNS_FOLDER
 	//These file names have reactions in them
 	//displays computer mechanism of reaction using std::cout if show_mech is true
-	std::string phys_obs(bool disp_each=false)const;
+	void phys_obs_disp()const;
 	//physical observation of test tube
 	//disp_each displays each observation separately using disp_msg
 };
@@ -457,20 +466,25 @@ namespace boost
 }
 
 void get_random_line(const char* fname,char* line)
+//gets a random line from file 'fname' into 'line'
 {
-	std::ifstream ifile(ANAL_SALTS);
+	std::ifstream ifile(fname);
 	int i,size,pos;
 	comp_t comp;
-	if(!ifile.is_open())disp_error(std::string("Can't open ")+ANAL_SALTS);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+fname);
 	for(size=0;ifile.ignore(10000,'\n');++size);
 	ifile.clear();
 	ifile.seekg(0);
-	srand(unsigned(time(NULL)));pos=rand()%size;
+	srand(unsigned(std::time(NULL)));pos=rand()%size;
 	for(i=0;i<=pos;i++)ifile>>line;
 	ifile.close();
 }
 
 bool my_includes(const std::set<comp_t>& bigset,const std::set<comp_t>& smallset)
+/*my own version of std::includes written specially for std::set<comp_t>
+This had to be done because comp_t::operator==(const comp_t&)const was not transitive
+So I couldn't rewrite comp_t::operator<(const comp_t&)const so that STL can
+use (!(a<b) && !(b<a)) to get the same result as a==b*/
 {
 	std::set<comp_t>::const_iterator its,itb;
 	bool found_elem_in_big=false;
@@ -486,6 +500,7 @@ bool my_includes(const std::set<comp_t>& bigset,const std::set<comp_t>& smallset
 	}
 	return true;
 }
+
 void comp_t::operator=(const std::string& form_with_state)
 {
 	int pos;std::string state;
@@ -761,7 +776,6 @@ void tube_t::react_list(const char* fname/*=RXNS_FILE*/)
 {
 	char path[FILE_PATH_SIZE],str[FILE_NAME_SIZE];
 	std::ifstream ifile(fname);
-	std::string mech,prev_mech;
 	if(!ifile.is_open())disp_error(std::string("Can't open ")+fname);
 	react_prep();
 	while(my_getline(ifile,str,FILE_NAME_SIZE))
@@ -773,24 +787,20 @@ void tube_t::react_list(const char* fname/*=RXNS_FILE*/)
 	precipitate();
 }
 
-std::string tube_t::phys_obs(bool disp_each/*=false*/)const
+void tube_t::phys_obs_disp()const
 {
 	std::ifstream pptfile(PPTS);
 	std::ifstream ionfile(ION_COLOR);
 	std::ifstream gasfile(GAS_SMELL_COLOR);
 	std::set<comp_t>::const_iterator it=comp_list.begin();
-	std::string comp,color,smell,result;
+	std::string comp,color,smell;
 	for(;it!=comp_list.end();++it)
 	{
 		if(it->st==myenum::solid)
 		{
 			pptfile.clear();
 			pptfile.seekg(0);
-			while(pptfile>>comp>>color)if(comp==it->form)
-			{
-				result.append(color).append(" ppt,");
-				if(disp_each)disp_msg(color+" ppt");
-			}
+			while(pptfile>>comp>>color)if(comp==it->form)disp_msg(color+" ppt");
 		}
 		else if(it->st==myenum::gas)
 		{
@@ -798,36 +808,22 @@ std::string tube_t::phys_obs(bool disp_each/*=false*/)const
 			gasfile.seekg(0);
 			while(gasfile>>comp>>smell>>color)if(comp==it->form)
 			{
-				if(color!="none")
-				{
-					result.append(color).append(" gas,");
-					if(disp_each)disp_msg(color+" gas");
-				}
-				if(smell!="none")
-				{
-					result.append(smell).append(" smell,");
-					if(disp_each)disp_msg(smell+" smell");
-				}
+				if(color!="none")disp_msg(color+" gas");
+				if(smell!="none")disp_msg(smell+" smell");
 			}
 		}
 		else if(it->comp_type==myenum::anion || it->comp_type==myenum::cation || it->comp_type==myenum::notsalt)
 		{
 			ionfile.clear();
 			ionfile.seekg(0);
-			while(ionfile>>comp>>color)if(comp==it->form)
-			{
-				result.append(color).append(" sol,");
-				if(disp_each)disp_msg(color+" solution");
-			}
+			while(ionfile>>comp>>color)if(comp==it->form)disp_msg(color+" solution");
 		}
 	}
-	if(result.size()!=0)result.erase(result.size()-1,1);
-	else result="none";
 	pptfile.close();
 	ionfile.close();
 	gasfile.close();
-	return result;
 }
+
 //================================================================================
 
 using namespace std;
@@ -875,7 +871,7 @@ void reaction()
 		tube.assign(str,heat);
 		tube.react_list(RXNS_FILE);
 		cout<<boost::lexical_cast<std::string>(tube)<<endl;
-		tube.phys_obs(true);
+		tube.phys_obs_disp();
 	}
 	while(true);
 }
@@ -911,6 +907,8 @@ void salt_analysis(char mode)
 			if(mode=='s')comp=get_random_salt();
 			else if(mode=='a')comp=get_random_anion();
 			else if(mode=='c')comp=get_random_cation();
+			tube.comp_list.clear();
+			tube.add(comp);
 		}
 		else if(str=="clear"){tube.comp_list.clear();tube.add(comp);}
 		else if(str=="disp")cout<<boost::lexical_cast<std::string>(tube)<<endl;
@@ -922,7 +920,7 @@ void salt_analysis(char mode)
 			cout<<endl;
 			tube.add(str,heat);
 			tube.react_list(RXNS_FILE);
-			tube.phys_obs(true);
+			tube.phys_obs_disp();
 		}
 	}
 	while(true);
