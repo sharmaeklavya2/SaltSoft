@@ -17,12 +17,10 @@ Because of the above reason, the program may seem a bit chaotic.
 
 #pragma warning(disable:4996)
 
-#include<iostream>
 #include<fstream>
 #include<cstring>
 #include<cstdlib>
 #include<ctime>
-#include<conio.h>	//for _get_restrict_che()
 #include<string>
 #include<set>
 #include<algorithm>
@@ -35,7 +33,7 @@ Because of the above reason, the program may seem a bit chaotic.
 #define FILE_PATH_SIZE 256
 #define FILE_NAME_SIZE 30
 
-//Std File Names
+//File Names
 #define CATION_LIST "progdata\\cations.txt"
 #define ANION_LIST	"progdata\\anions.txt"
 #define SALT_SPLIT	"progdata\\salt split.txt"
@@ -51,6 +49,7 @@ Because of the above reason, the program may seem a bit chaotic.
 #define ANAL_CATIONS	"progdata\\salt analysis\\cations.txt"
 #define ANAL_ANIONS	"progdata\\salt analysis\\anions.txt"
 #define HELP_FILE	"progdata\\help.txt"
+#define ALIAS_FILE	"progdata\\alias.txt"
 
 //global=functions================================================================
 
@@ -94,54 +93,8 @@ bool ion_match(const char* ion,const char* stdion)
 	int i,h=strlen(ion),hstd=strlen(stdion);
 	if(h<hstd)return false;
 	for(i=0;i<hstd;i++)if(ion[i]!=stdion[i])return false;
+//	for(i=0;i<h;i++)if((ion[i]<'\0' || ion[i]>'9') && ion[i]!='-' && ion[i]!='+')return false;
 	return true;
-}
-
-char _get_restrict_che(const char* a)
-{
-	char ch;unsigned i;
-	while(true)
-	{
-		ch=_getch();
-		for(i=0;a[i]!='\0';i++)if(ch==a[i])
-		{_putch(ch);return ch;}
-	}
-}
-
-void disp_error(const char* str)
-{
-#ifdef _WINDOWS_
-	MessageBox(NULL,str,"Chem Analyze error",MB_ICONERROR|MB_OK);
-#else
-	std::cout<<"Error:\t"<<str<<std::endl;
-#endif
-}
-
-void disp_error(const std::string& str)
-{
-#ifdef _WINDOWS_
-	MessageBox(NULL,str.c_str(),"Chem Analyze error",MB_ICONERROR|MB_OK);
-#else
-	std::cout<<"Error:\t"<<str<<std::endl;
-#endif
-}
-
-void disp_msg(const char* str)
-{
-#ifdef _WINDOWS_
-	MessageBox(NULL,str,"Chem Analyze msg",MB_ICONINFORMATION|MB_OK);
-#else
-	std::cout<<str<<std::endl;
-#endif
-}
-
-void disp_msg(const std::string& str)
-{
-#ifdef _WINDOWS_
-	MessageBox(NULL,str.c_str(),"Chem Analyze msg",MB_ICONINFORMATION|MB_OK);
-#else
-	std::cout<<str<<std::endl;
-#endif
 }
 
 std::istream& my_getline(std::istream& is,std::string& str,char delim='\n')
@@ -310,7 +263,7 @@ class tube_t
 	{comp_list.insert(comp);}
 	void add(const char* formula,myenum::state_t state,myenum::comp_type_t type=myenum::none)
 	{comp_list.insert(comp_t(formula,state,type));}
-	bool carry_rxn(const rxn_t& rxn);
+	bool carry_rxn(const rxn_t& rxn,std::string& obs);
 	//carries out given reaction in tube (if possible)
 	//rxn should be pre-filled using rxn_t::operator=(const std::string& str);
 	//return true if reaction happened
@@ -320,16 +273,24 @@ class tube_t
 	void add(std::string str,bool heat=false);
 	void precipitate();
 	//checks for ions present and precipitates precipitable salts.
-	void react(const char* fname);
+	void react(const char* fname,std::set<std::string>& obs_set);
 	//carries out reactions from a reaction file
-	void react_list(const char* fname=RXNS_FILE);
+	void react_list(const char* fname,std::set<std::string>& obs_set);
 	//carries out reactions from a reaction list file
 	//The reaction list file contains file names from the RXNS_FOLDER
 	//These file names have reactions in them
 	//displays computer mechanism of reaction using std::cout if show_mech is true
-	void phys_obs_disp()const;
-	//physical observation of test tube
-	//disp_each displays each observation separately using disp_msg
+	void phys_obs(std::set<std::string>& obs_set)const;
+	//physical observation of test tube is added to the set
+	void remove_with_state(myenum::state_t state)
+	{
+		std::set<comp_t>::iterator it=comp_list.begin();
+		for(;it!=comp_list.end();)
+		{
+			if(it->st==state)comp_list.erase(it++);
+			else ++it;
+		}
+	}
 };
 
 //--------------------------------------------------------------------------------
@@ -480,6 +441,34 @@ void get_random_line(const char* fname,char* line)
 	ifile.close();
 }
 
+comp_t get_random_anion()
+{
+	comp_t comp;
+	get_random_line(ANAL_ANIONS,comp.form);
+	comp.st=myenum::solid;
+	comp.comp_type=myenum::anion;
+	return comp;
+}
+
+comp_t get_random_cation()
+{
+	comp_t comp;
+	get_random_line(ANAL_CATIONS,comp.form);
+	comp.st=myenum::solid;
+	comp.comp_type=myenum::cation;
+	return comp;
+}
+
+comp_t get_random_salt()
+{
+	comp_t comp;
+	get_random_line(ANAL_SALTS,comp.form);
+	comp.st=myenum::solid;
+	comp.comp_type=myenum::salt;
+	comp.split();
+	return comp;
+}
+
 bool my_includes(const std::set<comp_t>& bigset,const std::set<comp_t>& smallset)
 /*my own version of std::includes written specially for std::set<comp_t>
 This had to be done because comp_t::operator==(const comp_t&)const was not transitive
@@ -532,7 +521,7 @@ void comp_t::split()
 	bool found;
 	//first check "salt split.txt" for standard splitting
 	std::ifstream ifile(SALT_SPLIT);
-	if(!ifile.is_open())disp_error(std::string("Can't open")+SALT_SPLIT);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+SALT_SPLIT);
 	while(ifile>>stdform>>stdcat>>stdan)if(std::strcmp(stdform,form)==0)
 	{
 		ifile.close();
@@ -548,7 +537,7 @@ void comp_t::split()
 	//if it exists, get its charge and append the charge at the end of the data member 'cation'
 	ifile.clear();
 	ifile.open(CATION_LIST);
-	if(!ifile.is_open())disp_error(std::string("Can't open")+CATION_LIST);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+CATION_LIST);
 	found=false;
 	while(ifile>>stdcat>>charge)if(std::strcmp(stdcat,cation)==0)
 	{
@@ -563,7 +552,7 @@ void comp_t::split()
 	//if it exists, get its charge and append the charge at the end of the data member 'anion'
 	ifile.clear();
 	ifile.open(ANION_LIST);
-	if(!ifile.is_open())disp_error(std::string("Can't open")+ANION_LIST);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+ANION_LIST);
 	found=false;
 	while(ifile>>stdan>>charge)if(ion_match(anion,stdan))
 	{
@@ -583,7 +572,7 @@ void comp_t::split()
 	}
 	comp_type=myenum::salt;
 }
-bool tube_t::carry_rxn(const rxn_t& rxn)
+bool tube_t::carry_rxn(const rxn_t& rxn,std::string& obs)
 {
 	std::set<comp_t>::const_iterator itr;
 	std::set<comp_t>::iterator it;
@@ -614,8 +603,7 @@ bool tube_t::carry_rxn(const rxn_t& rxn)
 		}
 	}
 	comp_list.insert(rxn.prod_list.begin(),rxn.prod_list.end());
-	if(!rxn.comment.empty())
-	{disp_msg(rxn.comment);}
+	obs=rxn.comment;
 	if(show_mech)std::cout<<boost::lexical_cast<std::string>(*this)<<std::endl;
 	return true;
 }
@@ -662,7 +650,7 @@ void tube_t::react_prep()
 	}
 	//check for dissoc media
 	ifile.open(DISSOC_MEDIA);
-	if(!ifile.is_open())disp_error(std::string("Can't open")+DISSOC_MEDIA);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+DISSOC_MEDIA);
 	while(ifile>>dummy)
 	{
 		comp=dummy;
@@ -678,8 +666,8 @@ void tube_t::react_prep()
 	ifile.clear();
 	ifile.open(PPTS);
 	ifile2.open(NEVER_PPT_ION);
-	if(!ifile.is_open())disp_error(std::string("Can't open")+PPTS);
-	if(!ifile2.is_open())disp_error(std::string("Can't open")+NEVER_PPT_ION);
+	if(!ifile.is_open())disp_error(std::string("Can't open ")+PPTS);
+	if(!ifile2.is_open())disp_error(std::string("Can't open ")+NEVER_PPT_ION);
 	new_comp_list=comp_list;
 	BOOST_FOREACH(comp,comp_list)if(comp.comp_type==myenum::salt)
 	{
@@ -762,17 +750,20 @@ void tube_t::precipitate()
 	//add 'to_add' to 'comp_list'
 }*/
 
-void tube_t::react(const char* fname)
+void tube_t::react(const char* fname,std::set<std::string>& obs_set)
 {
 	std::ifstream ifile(fname);
 	if(!ifile.is_open())disp_error(std::string("Can't open ")+fname);
-	std::string str;
+	std::string str,obs;
 	while(ifile>>str)
-	{carry_rxn(boost::lexical_cast<rxn_t>(str));}
+	{
+		carry_rxn(boost::lexical_cast<rxn_t>(str),obs);
+		if(!obs.empty())obs_set.insert(obs);
+	}
 	ifile.close();
 }
 
-void tube_t::react_list(const char* fname/*=RXNS_FILE*/)
+void tube_t::react_list(const char* fname/*=RXNS_FILE*/,std::set<std::string>& obs_set)
 {
 	char path[FILE_PATH_SIZE],str[FILE_NAME_SIZE];
 	std::ifstream ifile(fname);
@@ -782,12 +773,12 @@ void tube_t::react_list(const char* fname/*=RXNS_FILE*/)
 	{
 		strcpy(path,RXNS_FOLDER);
 		strcat(path,str);
-		react(path);
+		react(path,obs_set);
 	}
 	precipitate();
 }
 
-void tube_t::phys_obs_disp()const
+void tube_t::phys_obs(std::set<std::string>& obs_set)const
 {
 	std::ifstream pptfile(PPTS);
 	std::ifstream ionfile(ION_COLOR);
@@ -800,7 +791,7 @@ void tube_t::phys_obs_disp()const
 		{
 			pptfile.clear();
 			pptfile.seekg(0);
-			while(pptfile>>comp>>color)if(comp==it->form)disp_msg(color+" ppt");
+			while(pptfile>>comp>>color)if(comp==it->form)obs_set.insert(color+" ppt");
 		}
 		else if(it->st==myenum::gas)
 		{
@@ -808,15 +799,15 @@ void tube_t::phys_obs_disp()const
 			gasfile.seekg(0);
 			while(gasfile>>comp>>smell>>color)if(comp==it->form)
 			{
-				if(color!="none")disp_msg(color+" gas");
-				if(smell!="none")disp_msg(smell+" smell");
+				if(color!="none")obs_set.insert(color+" gas");
+				if(smell!="none")obs_set.insert(smell+" smell");
 			}
 		}
 		else if(it->comp_type==myenum::anion || it->comp_type==myenum::cation || it->comp_type==myenum::notsalt)
 		{
 			ionfile.clear();
 			ionfile.seekg(0);
-			while(ionfile>>comp>>color)if(comp==it->form)disp_msg(color+" solution");
+			while(ionfile>>comp>>color)if(comp==it->form)obs_set.insert(color+" solution");
 		}
 	}
 	pptfile.close();
@@ -825,114 +816,3 @@ void tube_t::phys_obs_disp()const
 }
 
 //================================================================================
-
-using namespace std;
-
-comp_t get_random_anion()
-{
-	comp_t comp;
-	get_random_line(ANAL_ANIONS,comp.form);
-	comp.st=myenum::solid;
-	comp.comp_type=myenum::anion;
-	return comp;
-}
-
-comp_t get_random_cation()
-{
-	comp_t comp;
-	get_random_line(ANAL_CATIONS,comp.form);
-	comp.st=myenum::solid;
-	comp.comp_type=myenum::cation;
-	return comp;
-}
-
-comp_t get_random_salt()
-{
-	comp_t comp;
-	get_random_line(ANAL_SALTS,comp.form);
-	comp.st=myenum::solid;
-	comp.comp_type=myenum::salt;
-	comp.split();
-	return comp;
-}
-
-void reaction()
-{
-	std::string str;
-	tube_t tube;
-	bool heat;
-	do
-	{
-		cout<<"\nEnter reactants:\t";
-		cin>>str;
-		cout<<"Heat? (y/n) ";
-		heat=('y'==_get_restrict_che("yn"));
-		cout<<endl;
-		tube.assign(str,heat);
-		tube.react_list(RXNS_FILE);
-		cout<<boost::lexical_cast<std::string>(tube)<<endl;
-		tube.phys_obs_disp();
-	}
-	while(true);
-}
-
-void show_help()
-{
-	std::ifstream ifile(HELP_FILE);
-	std::string str;
-	std::getline(ifile,str,char(EOF));
-	ifile.close();
-	disp_msg(str);
-}
-
-void salt_analysis(char mode)
-{
-	std::string str;
-	tube_t tube;
-	bool heat;
-	comp_t comp;
-	if(mode=='s')comp=get_random_salt();
-	else if(mode=='a')comp=get_random_anion();
-	else if(mode=='c')comp=get_random_cation();
-	tube.add(comp);
-	do
-	{
-		cout<<"\nEnter reagents:\t";
-		if(cin.peek()=='\n')cin.ignore();
-		getline(cin,str);
-		if(str==comp.form)cout<<"Correct!"<<endl;
-		else if(str=="answer")cout<<comp.form<<endl;
-		else if(str=="new")
-		{
-			if(mode=='s')comp=get_random_salt();
-			else if(mode=='a')comp=get_random_anion();
-			else if(mode=='c')comp=get_random_cation();
-			tube.comp_list.clear();
-			tube.add(comp);
-		}
-		else if(str=="clear"){tube.comp_list.clear();tube.add(comp);}
-		else if(str=="disp")cout<<boost::lexical_cast<std::string>(tube)<<endl;
-		else if(str=="help")show_help();
-		else
-		{
-			cout<<"Heat? (y/n) ";
-			heat=('y'==_get_restrict_che("yn"));
-			cout<<endl;
-			tube.add(str,heat);
-			tube.react_list(RXNS_FILE);
-			tube.phys_obs_disp();
-		}
-	}
-	while(true);
-}
-
-int main()
-{
-	char ch;
-	cout<<"Enter an option:\nr - Reactions\ns - Salt analysis\na - Anion analysis\nc - Cation analysis\n"<<endl;
-	ch=_get_restrict_che("rsac");
-	cout<<endl;
-	if(ch=='r')reaction();
-	else salt_analysis(ch);
-	return 0;
-}
