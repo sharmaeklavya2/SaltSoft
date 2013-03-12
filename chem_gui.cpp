@@ -1,7 +1,6 @@
+#define WIN32_LEAN_AND_MEAN
 #include<windows.h>
 #include<string>
-#include<commctrl.h>
-#pragma comment(lib,"Comctl32")
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -149,6 +148,7 @@ BOOL CALLBACK DlgProc(HWND hDlg,UINT Msg,WPARAM wParam,LPARAM lParam)
 		case IDC_CLEAR:
 			tube.comp_list.clear();
 			lbreac.clear();
+			SendMessage(hObs,WM_SETTEXT,0,(LPARAM)"");
 			break;
 		case IDC_REACT:
 			tube.hight=(IsDlgButtonChecked(hDlg,IDC_HEAT)==BST_CHECKED);
